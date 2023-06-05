@@ -1,5 +1,5 @@
 az artifacts universal publish `
-    --organization "https://adigunpalmer.visualstudio.com/" `
+    --organization "https://dev.azure.com/adigunpalmer/" `
     --project="reference-implementation" `
     --scope "project" `
     --feed "Terraform" `

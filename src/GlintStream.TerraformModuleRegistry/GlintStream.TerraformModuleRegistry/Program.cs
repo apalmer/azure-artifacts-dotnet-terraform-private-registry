@@ -1,7 +1,13 @@
 
+using GlintStream.TerraformModuleRegistry.Models;
 using GlintStream.TerraformModuleRegistry.Processors;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using System;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Net.Http.Headers;
+using System.Xml.Linq;
 
 namespace GlintStream.TerraformModuleRegistry
 {
@@ -33,54 +39,70 @@ namespace GlintStream.TerraformModuleRegistry
 
             app.UseAuthorization();
 
-            var baseUrl = builder.Configuration["AzureDevOps:BaseUrl"];
+            var feedBaseUrl = builder.Configuration["AzureDevOps:FeedsBaseUrl"];
+            var organization = builder.Configuration["AzureDevOps:Organization"];
+            var project = builder.Configuration["AzureDevOps:Project"];
             var personalAccessToken = builder.Configuration["AzureDevOps:PersonalAccessToken"];
 
-            if (baseUrl != null)
+            var baseAddress = $"{feedBaseUrl}/{organization}/{project}/";
+            if (baseAddress != null)
             {
-                _client.BaseAddress = new Uri(baseUrl);
+                _client.BaseAddress = new Uri(baseAddress);
             }
 
             _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
-                Convert.ToBase64String(
-                    System.Text.ASCIIEncoding.ASCII.GetBytes(
-                        string.Format("{0}:{1}", "", personalAccessToken))));
+            var authPayload = $":{personalAccessToken}";
+            var authBytes = System.Text.Encoding.Unicode.GetBytes(authPayload);
+            var authBase64 = Convert.ToBase64String(authBytes);
 
-            var proc = new Processor(_client);
+            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authBase64);
 
-            app.MapGet("/.well-known/terraform.json", async (HttpContext httpContext) =>
+            var adoRestApiHelper = new AdoRestApiHelper(_client, builder.Configuration);
+
+            var azCliHelper = new AzCliHelper(builder.Configuration);
+
+            app.MapGet("/.well-known/terraform.json", (HttpContext httpContext) =>
             {
-                return await proc.GetServiceDiscovery();
+                return new ServiceDiscovery();
             })
             .WithName("GetServiceDiscovery")
             .WithOpenApi();
 
             app.MapGet("/{name_space}/{name}/{system}/versions", async (string name_space, string name, string system, HttpContext httpContext) =>
             {
-                return await proc.GetModuleVersions(name_space, name, system);
+                try
+                {
+                    var results = await adoRestApiHelper.GetModuleVersions(name_space, name, system);
+                    return Results.Ok(results);
+                }
+                catch (ArgumentException ae)
+                {
+                    return Results.NotFound();
+                }
             })
             .WithName("GetModuleVersions")
             .WithOpenApi();
 
-            app.MapGet("/{name_space}/{name}/{system}/{version}/download", async (string name_space, string name, string system, string version, HttpContext httpContext) =>
+            app.MapGet("/{name_space}/{name}/{system}/{version}/download", async (string name_space, string name, string system, string version, HttpContext httpContext, LinkGenerator linker) =>
             {
-                var downloadLink = await proc.GetDownloadLink(name_space, name, system, version);
-                httpContext.Response.Headers.Add("X-Terraform-Get", downloadLink.Link);
+                var downloadFileUrl = linker.GetPathByName("GetDownloadArchive", values: new { name_space = name_space, name = name, system = system, version = version });
+                httpContext.Response.Headers.Add("X-Terraform-Get", downloadFileUrl);
+                return Results.Ok();
+
             })
             .WithName("GetDownloadLink")
             .WithOpenApi();
 
-
-            app.MapGet("/{name_space}/{name}/{system}/{version}/download-file", async (string name_space, string name, string system, string version, HttpContext httpContext) =>
+            //The route pattern ending in the extension .zip is important, otherwise terraform wont treat the downloaded file as a zip archive.
+            app.MapGet("/{name_space}/{name}/{system}/{version}/download.zip", async (string name_space, string name, string system, string version, HttpContext httpContext) =>
             {
-                
-                return await proc.GetDownloadFile(name_space, name, system, version);
+                var downloadFile = await azCliHelper.DownloadPackage(name_space, name, system, version);
+                var mimeType = "application/zip";
+                return Results.File(downloadFile.FilePath, mimeType, downloadFile.FileName);
             })
-            .WithName("GetDownloadFile")
+            .WithName("GetDownloadArchive")
             .WithOpenApi();
-
 
             app.Run();
         }

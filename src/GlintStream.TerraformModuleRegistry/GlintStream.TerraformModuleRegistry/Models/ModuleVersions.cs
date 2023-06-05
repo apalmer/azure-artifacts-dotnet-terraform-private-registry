@@ -3,7 +3,7 @@
     public class VersionInfo
     {
         [System.Text.Json.Serialization.JsonPropertyName("version")]
-        public String Version
+        public String? Version
         {
             get;set;
         }
@@ -25,12 +25,6 @@
         public ModuleVersions()
         {
             Modules = new  List<VersionSet>();
-            var module = new VersionSet();
-            module.Versions.Add(new VersionInfo() { Version = "1.0.0" });
-            module.Versions.Add(new VersionInfo() { Version = "1.1.0" });
-            module.Versions.Add(new VersionInfo() { Version = "2.0.0" });
-
-            Modules.Add(module);
         }
 
         [System.Text.Json.Serialization.JsonPropertyName("modules")]

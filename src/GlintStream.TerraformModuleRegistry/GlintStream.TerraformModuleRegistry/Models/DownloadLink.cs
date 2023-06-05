@@ -2,6 +2,6 @@
 {
     public class DownloadLink
     { 
-        public string Link { get; set; }
+        public string? Link { get; set; }
     }
 }
